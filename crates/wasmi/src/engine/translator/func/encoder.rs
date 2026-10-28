@@ -94,6 +94,7 @@ impl<T> fmt::Debug for Pos<T> {
 pub struct EncodedOps {
     buffer: Vec<u8>,
     temp: Option<ReportingPos>,
+    portable: bool,
 }
 
 /// A [`Pos`] of an encoded item that needs to be reported back.
@@ -132,6 +133,11 @@ impl EncodedOps {
         debug_assert!(new_len <= self.buffer.len());
         self.buffer.truncate(new_len);
     }
+
+    /// Sets whether to encode in portable bytecode mode (OpCode as u16).
+    pub fn set_portable(&mut self, portable: bool) {
+        self.portable = portable;
+    }
 }
 
 impl ir::Encoder for EncodedOps {
@@ -148,7 +154,11 @@ impl ir::Encoder for EncodedOps {
     }
 
     fn encode_op_code(&mut self, code: OpCode) -> Result<Self::Pos, Self::Error> {
-        encode_op_code(self, code)
+        if self.portable || cfg!(feature = "indirect-dispatch") {
+            u16::from(code).encode(self)
+        } else {
+            (op_code_to_handler(code) as usize).encode(self)
+        }
     }
 
     fn branch_offset(
@@ -249,8 +259,9 @@ impl Reset for OpEncoderAllocations {
 
 impl OpEncoder {
     /// Creates a new [`OpEncoder`].
-    pub fn new(engine: &Engine, alloc: OpEncoderAllocations) -> Self {
+    pub fn new(engine: &Engine, mut alloc: OpEncoderAllocations) -> Self {
         let consume_fuel = engine.config().get_consume_fuel();
+        alloc.ops.set_portable(engine.config().get_portable_bytecode());
         Self {
             staged: None,
             consume_fuel,
@@ -455,8 +466,8 @@ impl OpEncoder {
     /// Does nothing if the buffer is already aligned.
     pub fn pad_to_op_alignment(&mut self) -> Result<(), Error> {
         const ALIGN: usize = core::mem::align_of::<fn()>();
-        if cfg!(feature = "indirect-dispatch") {
-            // Only pad to alignment when `indirect-dispatch` is disabled.
+        if self.ops.portable || cfg!(feature = "indirect-dispatch") {
+            // Only pad to alignment when `indirect-dispatch` is disabled and not in portable mode.
             return Ok(());
         }
         let len = self.ops.buffer.len();

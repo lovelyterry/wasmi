@@ -545,7 +545,7 @@ impl FuncEntry {
     }
 
     /// Returns `true` if `self` has already been initialized.
-    fn is_initialized(&self) -> bool {
+    pub(crate) fn is_initialized(&self) -> bool {
         self.state.load(Ordering::Relaxed) != state::UNINIT
     }
 
@@ -940,11 +940,31 @@ impl fmt::Debug for UncompiledFuncEntry {
     }
 }
 
+/// The bytecode storage for a [`CompiledFuncEntry`].
+#[derive(Debug)]
+pub enum BytecodeBuffer {
+    /// Owned bytecode allocated on the heap.
+    Owned(Pin<Box<[u8]>>),
+    /// Static bytecode residing in read-only memory (e.g. MCU Flash / .rodata).
+    Static(&'static [u8]),
+}
+
+impl BytecodeBuffer {
+    /// Returns the bytecode as a slice.
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Owned(ops) => ops.as_ref().get_ref(),
+            Self::Static(ops) => ops,
+        }
+    }
+}
+
 /// Meta information about a [`EngineFunc`].
 #[derive(Debug)]
 pub struct CompiledFuncEntry {
     /// The sequence of [`Op`] of the [`CompiledFuncEntry`].
-    ops: Pin<Box<[u8]>>,
+    ops: BytecodeBuffer,
     /// The total number of stack slots for locals for the [`EngineFunc`].
     ///
     /// # Note
@@ -974,9 +994,9 @@ impl CompiledFuncEntry {
     /// - If `ops` contains more than `i32::MAX` encoded bytes.
     pub fn new(len_local_slots: u16, len_stack_slots: u16, ops: &[u8]) -> Self {
         debug_assert!(len_local_slots <= len_stack_slots);
-        let ops: Pin<Box<[u8]>> = Pin::new(ops.into());
+        let ops = BytecodeBuffer::Owned(Pin::new(ops.into()));
         debug_assert!(
-            !ops.is_empty(),
+            !ops.as_slice().is_empty(),
             "compiled functions must have at least one instruction"
         );
         debug_assert!(
@@ -985,15 +1005,52 @@ impl CompiledFuncEntry {
             //  - `i32::MIN` bytes backwards
             // Therefore, having more than `i32::MAX` bytes of operators allows
             // for the existence of branches that overflow these spans.
-            ops.len() <= i32::MAX as usize,
+            ops.as_slice().len() <= i32::MAX as usize,
             "compiled function has too many operators: {}",
-            ops.len(),
+            ops.as_slice().len(),
         );
         Self {
             ops,
             len_local_slots,
             len_stack_slots,
         }
+    }
+
+    /// Creates a [`CompiledFuncEntry`] from a static slice (e.g. residing in MCU Flash).
+    pub fn new_static(len_local_slots: u16, len_stack_slots: u16, ops: &'static [u8]) -> Self {
+        debug_assert!(len_local_slots <= len_stack_slots);
+        debug_assert!(
+            !ops.is_empty(),
+            "compiled functions must have at least one instruction"
+        );
+        debug_assert!(
+            ops.len() <= i32::MAX as usize,
+            "compiled function has too many operators: {}",
+            ops.len(),
+        );
+        Self {
+            ops: BytecodeBuffer::Static(ops),
+            len_local_slots,
+            len_stack_slots,
+        }
+    }
+
+    /// Returns the sequence of encoded [`Op`]s.
+    #[inline]
+    pub fn ops(&self) -> &[u8] {
+        self.ops.as_slice()
+    }
+
+    /// Returns the local slots.
+    #[inline]
+    pub fn len_local_slots(&self) -> u16 {
+        self.len_local_slots
+    }
+
+    /// Returns the stack slots.
+    #[inline]
+    pub fn len_stack_slots(&self) -> u16 {
+        self.len_stack_slots
     }
 }
 
@@ -1002,7 +1059,7 @@ impl CompiledFuncEntry {
 pub struct CompiledFuncRef<'a> {
     /// The sequence of encoded [`Op`]s of the [`CompiledFuncEntry`].
     ops: Pin<&'a [u8]>,
-    /// The total number of stack slots used for locals of the [`EngineFunc`].
+    /// The total number of stack slots for locals for the [`EngineFunc`].
     len_local_slots: u16,
     /// The number of stack slots used by the [`EngineFunc`].
     len_stack_slots: u16,
@@ -1012,7 +1069,7 @@ impl<'a> From<&'a CompiledFuncEntry> for CompiledFuncRef<'a> {
     #[inline]
     fn from(func: &'a CompiledFuncEntry) -> Self {
         Self {
-            ops: func.ops.as_ref(),
+            ops: Pin::new(func.ops.as_slice()),
             len_local_slots: func.len_local_slots,
             len_stack_slots: func.len_stack_slots,
         }

@@ -30,6 +30,8 @@ pub struct Config {
     compilation_mode: CompilationMode,
     /// Enforced limits for Wasm module parsing and compilation.
     limits: EnforcedLimits,
+    /// Is `true` if Wasmi generates portable bytecode (e.g. for MCU Flash export).
+    portable_bytecode: bool,
 }
 
 /// The chosen mode of Wasm to Wasmi bytecode compilation.
@@ -68,6 +70,7 @@ impl Default for Config {
             operator_cost: OperatorCostStrategy::default(),
             compilation_mode: CompilationMode::default(),
             limits: EnforcedLimits::default(),
+            portable_bytecode: false,
         }
     }
 }
@@ -452,6 +455,21 @@ impl Config {
     /// [`Engine`]: crate::Engine
     pub(super) fn get_compilation_mode(&self) -> CompilationMode {
         self.compilation_mode
+    }
+
+    /// Sets whether to generate portable bytecode for exporting to static C arrays / MCU Flash.
+    ///
+    /// When enabled:
+    /// - OpCodes are always encoded as `u16` IDs (indirect dispatch) instead of host function pointers.
+    /// - Internal calls use position-independent indices (`CallImported`) instead of host memory pointers.
+    pub fn set_portable_bytecode(&mut self, enable: bool) -> &mut Self {
+        self.portable_bytecode = enable;
+        self
+    }
+
+    /// Returns `true` if portable bytecode generation is enabled.
+    pub fn get_portable_bytecode(&self) -> bool {
+        self.portable_bytecode
     }
 
     /// Sets the [`EnforcedLimits`] enforced by the [`Engine`] for Wasm module parsing and compilation.

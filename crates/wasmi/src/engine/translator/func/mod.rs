@@ -1570,22 +1570,28 @@ impl FuncTranslator {
         let func_idx = FuncIdx::from(function_index);
         let callee_ty = self.resolve_func_type(func_idx);
         let params = self.adjust_stack_for_call(&callee_ty)?;
-        let instr = match self.module.get_engine_func(func_idx) {
-            Some(engine_func) => {
-                // Case: We are calling an internal function and can optimize
-                //       this case by using the special instruction for it.
-                let Some(func_entity) = self.engine().resolve_func(engine_func) else {
-                    unreachable!("missing func entry at: {engine_func:?}")
-                };
-                call_internal(
-                    params,
-                    ir::InternalFunc::from(func_entity as *const FuncEntry as usize),
-                )
-            }
-            None => {
-                // Case: We are calling an imported function and must use the
-                //       general calling operator for it.
-                call_imported(params, self.func_addr(function_index))
+        let instr = if self.engine().config().get_portable_bytecode() {
+            // Case: Portable bytecode mode for MCU Flash export.
+            // Avoid baking host heap pointers (`func_entity as *const FuncEntry as usize`).
+            call_imported(params, self.func_addr(function_index))
+        } else {
+            match self.module.get_engine_func(func_idx) {
+                Some(engine_func) => {
+                    // Case: We are calling an internal function and can optimize
+                    //       this case by using the special instruction for it.
+                    let Some(func_entity) = self.engine().resolve_func(engine_func) else {
+                        unreachable!("missing func entry at: {engine_func:?}")
+                    };
+                    call_internal(
+                        params,
+                        ir::InternalFunc::from(func_entity as *const FuncEntry as usize),
+                    )
+                }
+                None => {
+                    // Case: We are calling an imported function and must use the
+                    //       general calling operator for it.
+                    call_imported(params, self.func_addr(function_index))
+                }
             }
         };
         self.push_instr(instr)?;

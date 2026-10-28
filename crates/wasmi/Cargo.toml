@@ -24,6 +24,7 @@ wasmi_collections = { workspace = true }
 wasmi_ir = { workspace = true }
 wasmparser = { workspace = true, features = [] }
 wat = { workspace = true, optional = true }
+lzma-rs = { workspace = true }
 spin = { version = "0.9", default-features = false, features = [
     "mutex",
     "spin_mutex",

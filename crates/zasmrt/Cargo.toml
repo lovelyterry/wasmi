@@ -1,0 +1,18 @@
+[package]
+name = "zasmrt"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal lightweight runtime for executing .vasm and .zasm bytecode directly from Flash / memory"
+
+[lib]
+name = "zasmrt"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "zasmrt"
+path = "src/main.rs"
+
+[dependencies]
+wasmi = { workspace = true, default-features = false, features = ["std", "indirect-dispatch"] }

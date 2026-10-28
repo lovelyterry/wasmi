@@ -13,7 +13,7 @@ use crate::{
     FuncType,
     MemoryType,
     TableType,
-    engine::{EnforcedLimitsError, EngineFunc, TranslationError},
+    engine::{CompiledFuncEntry, EnforcedLimitsError, EngineFunc, TranslationError},
     module::MaybeDebug,
 };
 use alloc::boxed::Box;
@@ -42,6 +42,21 @@ use crate::Module;
 
 mod buffered;
 
+/// A precompiled function extracted from the `"wasmi_ir"` section.
+#[derive(Debug, Clone)]
+pub struct PrecompiledFunc {
+    pub len_local_slots: u16,
+    pub len_stack_slots: u16,
+    pub ops: PrecompiledOps,
+}
+
+/// The storage for precompiled function operations.
+#[derive(Debug, Clone)]
+pub enum PrecompiledOps {
+    Static(&'static [u8]),
+    Owned(alloc::vec::Vec<u8>),
+}
+
 /// Context used to construct a WebAssembly module from a stream of bytes.
 pub struct ModuleParser {
     /// The engine used for translation.
@@ -53,6 +68,10 @@ pub struct ModuleParser {
     parser: WasmParser,
     /// The number of compiled or processed functions.
     engine_funcs: u32,
+    /// Is `true` if the input buffer has static lifetime (e.g. Flash).
+    is_static: bool,
+    /// Precompiled functions loaded from the `"wasmi_ir"` section.
+    precompiled_funcs: alloc::vec::Vec<PrecompiledFunc>,
 }
 
 #[cfg_attr(not(feature = "validate"), allow(unused_mut, unused_variables))]
@@ -68,6 +87,8 @@ impl ModuleParser {
             validator: None,
             parser,
             engine_funcs: 0,
+            is_static: false,
+            precompiled_funcs: alloc::vec::Vec::new(),
         }
     }
 
@@ -518,6 +539,31 @@ impl ModuleParser {
         module: &mut ModuleBuilder,
     ) -> Result<(), Error> {
         let (func, engine_func) = self.next_func(module);
+        let internal_func_idx = (self.engine_funcs - 1) as usize;
+        if let Some(precompiled) = self.precompiled_funcs.get(internal_func_idx) {
+            #[cfg(feature = "validate")]
+            if let Some(validator) = &mut self.validator {
+                validator.code_section_entry(&func_body)?;
+            }
+            let compiled = match &precompiled.ops {
+                PrecompiledOps::Static(static_ops) => {
+                    CompiledFuncEntry::new_static(
+                        precompiled.len_local_slots,
+                        precompiled.len_stack_slots,
+                        static_ops,
+                    )
+                }
+                PrecompiledOps::Owned(ops) => {
+                    CompiledFuncEntry::new(
+                        precompiled.len_local_slots,
+                        precompiled.len_stack_slots,
+                        ops,
+                    )
+                }
+            };
+            self.engine.init_func_compiled(engine_func, compiled);
+            return Ok(());
+        }
         let offset = func_body.get_binary_reader().original_position();
         let func_to_validate = {
             #[cfg(feature = "validate")]
@@ -544,11 +590,52 @@ impl ModuleParser {
         reader: CustomSectionReader,
         module: &mut ModuleBuilder,
     ) -> Result<(), Error> {
+        if reader.name() == "wasmi_ir" {
+            if let Some(funcs) = self.parse_precompiled_ir(reader.data()) {
+                self.precompiled_funcs = funcs;
+                return Ok(());
+            }
+        }
         if self.engine.config().get_ignore_custom_sections() {
             return Ok(());
         }
         module.custom_sections.push(reader.name(), reader.data());
         Ok(())
+    }
+
+    /// Parses the precompiled `"wasmi_ir"` section data.
+    fn parse_precompiled_ir(&self, data: &[u8]) -> Option<alloc::vec::Vec<PrecompiledFunc>> {
+        if data.len() < 8 || &data[..4] != b"WIR1" {
+            return None;
+        }
+        let count = u32::from_le_bytes(data[4..8].try_into().ok()?) as usize;
+        let mut offset = 8;
+        let mut funcs = alloc::vec::Vec::with_capacity(count);
+        for _ in 0..count {
+            if offset + 8 > data.len() {
+                return None;
+            }
+            let len_local_slots = u16::from_le_bytes(data[offset..offset + 2].try_into().ok()?);
+            let len_stack_slots = u16::from_le_bytes(data[offset + 2..offset + 4].try_into().ok()?);
+            let ops_len = u32::from_le_bytes(data[offset + 4..offset + 8].try_into().ok()?) as usize;
+            offset += 8;
+            if offset + ops_len > data.len() {
+                return None;
+            }
+            let ops_slice = &data[offset..offset + ops_len];
+            offset += ops_len;
+            let ops = if self.is_static {
+                PrecompiledOps::Static(unsafe { core::mem::transmute::<&[u8], &'static [u8]>(ops_slice) })
+            } else {
+                PrecompiledOps::Owned(ops_slice.to_vec())
+            };
+            funcs.push(PrecompiledFunc {
+                len_local_slots,
+                len_stack_slots,
+                ops,
+            });
+        }
+        Some(funcs)
     }
 
     /// Process an unexpected, unsupported or malformed Wasm module section payload.

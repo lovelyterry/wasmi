@@ -2,7 +2,7 @@ use crate::build::{
     display::{
         Indent,
         ident::DisplayIdent,
-        utils::{DisplayConcat, DisplaySequence},
+        utils::DisplaySequence,
     },
     isa::Isa,
     op::Op,
@@ -23,14 +23,17 @@ impl<T> DisplayOpCode<T> {
 impl Display for DisplayOpCode<&'_ Isa> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let indent = self.indent;
-        let variants = DisplaySequence::new(
-            ",\n",
-            self.value
-                .ops
-                .iter()
-                .map(|op| (indent.inc(), DisplayIdent::camel(op)))
-                .map(DisplayConcat),
-        );
+        let sbox = crate::build::sbox::generate_sbox(self.value.ops.len());
+        let variants_vec: Vec<String> = self
+            .value
+            .ops
+            .iter()
+            .zip(&sbox)
+            .map(|(op, &scrambled)| {
+                format!("{}    {} = {scrambled}", indent, DisplayIdent::camel(op))
+            })
+            .collect();
+        let variants = variants_vec.join(",\n");
         let match_arms_code = DisplaySequence::new(
             ",\n",
             self.value
@@ -53,7 +56,7 @@ impl Display for DisplayOpCode<&'_ Isa> {
             {indent}/// The operator code (op-code) of a Wasmi bytecode [`Op`].\n\
             {indent}#[repr(u16)]\n\
             {indent}pub enum OpCode {{\n\
-                        {variants}\n\
+{variants}\n\
             {indent}}}\n\
             \n\
             {indent}impl Op {{\n\

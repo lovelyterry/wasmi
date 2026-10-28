@@ -63,6 +63,30 @@ pub unsafe extern "C" fn wasm_module_new(
     }
 }
 
+/// Creates a new [`wasm_module_t`] from static Flash memory.
+///
+/// Wraps [`Module::new_static`].
+///
+/// # Safety
+///
+/// The provided `bytes` buffer must have a static lifetime (e.g. residing in MCU Flash memory).
+#[cfg_attr(not(feature = "prefix-symbols"), unsafe(no_mangle))]
+#[cfg_attr(feature = "prefix-symbols", wasmi_c_api_macros::prefix_symbol)]
+pub unsafe extern "C" fn wasmi_module_new_static(
+    store: &mut wasm_store_t,
+    bytes: *const u8,
+    len: usize,
+) -> Option<Box<wasm_module_t>> {
+    let slice = unsafe { core::slice::from_raw_parts(bytes, len) };
+    let static_slice: &'static [u8] = unsafe { core::mem::transmute(slice) };
+    let context = unsafe { store.inner.context() };
+    let engine = context.engine();
+    match Module::new_static(engine, static_slice) {
+        Ok(module) => Some(Box::new(wasm_module_t::new(module))),
+        Err(_) => None,
+    }
+}
+
 /// Returns `true` if the Wasm `binary` successfully validates.
 ///
 /// Wraps [`Module::validate`].

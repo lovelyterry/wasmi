@@ -8,6 +8,7 @@ members = [
     "crates/wasmi",
     "crates/wasi",
     "crates/ir",
+    "crates/zasmrt",
     "crates/fuzz",
     "crates/wast",
     "fuzz",
@@ -51,6 +52,16 @@ wasmprinter = { version = "0.228.0", default-features = false }
 wasi-common = { version = "36.0.0", default-features = false }
 wiggle = { version = "36.0.0", default-features = false }
 wasmtime = { version = "47.0.3", default-features = false }
+
+# Compression
+lzma-rs = { version = "0.3", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [profile.bench]
 lto = "fat"

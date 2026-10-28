@@ -16,7 +16,7 @@ mod utils;
 pub(crate) use self::translator::ValidatingFuncTranslator;
 pub(crate) use self::{
     block_type::BlockType,
-    code_map::{FuncEntry, FuncEntryPtr},
+    code_map::{CompiledFuncEntry, FuncEntry, FuncEntryPtr},
     executor::{
         ExecContext,
         InOutParams,
@@ -40,7 +40,7 @@ pub(crate) use self::{
     },
 };
 use self::{
-    code_map::{CodeMap, CompiledFuncEntry},
+    code_map::CodeMap,
     costs::{OperatorCostStrategy, WasmOperator},
     func_types::FuncTypeRegistry,
     resumable::ResumableCallBase,
@@ -223,6 +223,11 @@ impl Engine {
     /// Returns a range of [`EngineFunc`]s to allow accessing the allocated [`EngineFunc`].
     pub(super) fn alloc_funcs(&self, amount: usize) -> EngineFuncSpan {
         self.inner.alloc_funcs(amount)
+    }
+
+    /// Initializes the uninitialized [`EngineFunc`] with a [`CompiledFuncEntry`].
+    pub(crate) fn init_func_compiled(&self, func: EngineFunc, compiled: CompiledFuncEntry) {
+        self.inner.init_func(func, compiled);
     }
 
     /// Translates the Wasm function using the [`Engine`].

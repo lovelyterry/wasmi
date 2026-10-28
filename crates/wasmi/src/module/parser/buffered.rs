@@ -21,6 +21,19 @@ impl ModuleParser {
         unsafe { self.parse_buffered_impl(buffer) }
     }
 
+    /// Starts parsing and validating a static Wasm bytecode stream (e.g. from MCU Flash).
+    ///
+    /// Precompiled function bytecodes in the `"wasmi_ir"` section will be borrowed with `'static` lifetime.
+    pub fn parse_buffered_static(mut self, buffer: &'static [u8]) -> Result<Module, Error> {
+        self.is_static = true;
+        #[cfg(feature = "validate")]
+        {
+            let features = self.engine.config().wasm_features();
+            self.validator = Some(Validator::new_with_features(features));
+        }
+        unsafe { self.parse_buffered_impl(buffer) }
+    }
+
     /// Starts parsing and validating the Wasm bytecode stream.
     ///
     /// Returns the compiled and validated Wasm [`Module`] upon success.
@@ -53,9 +66,24 @@ impl ModuleParser {
     /// # Errors
     ///
     /// If the Wasm bytecode stream fails to validate.
-    unsafe fn parse_buffered_impl(mut self, mut buffer: &[u8]) -> Result<Module, Error> {
+    unsafe fn parse_buffered_impl(mut self, buffer: &[u8]) -> Result<Module, Error> {
+        let dynamic_holder;
+        let mut slice = if buffer.starts_with(b"zasm") {
+            let decompressed = crate::module::zasm::decompress_entire_zasm(buffer)
+                .ok_or_else(|| Error::from(crate::engine::TranslationError::LazyCompilationFailed))?;
+            if self.is_static {
+                let static_slice: &'static [u8] = alloc::boxed::Box::leak(decompressed.into_boxed_slice());
+                static_slice
+            } else {
+                dynamic_holder = decompressed;
+                &dynamic_holder[..]
+            }
+        } else {
+            buffer
+        };
+
         let mut builder = ModuleBuilder::new(&self.engine);
-        self.parse_module(&mut buffer, &mut builder)?;
+        self.parse_module(&mut slice, &mut builder)?;
         let module = builder.finish()?;
         Ok(module)
     }
@@ -97,6 +125,23 @@ impl ModuleParser {
         buffer: &mut &[u8],
         module: &mut ModuleBuilder,
     ) -> Result<(), Error> {
+        if buffer.starts_with(b"vasm") || buffer.starts_with(b"zasm") {
+            let dummy_header = b"\0asm\x01\x00\x00\x00";
+            let (_, payload) = match self.parser.parse(dummy_header, false)? {
+                Chunk::Parsed { consumed, payload } => (consumed, payload),
+                _ => unreachable!(),
+            };
+            if let Payload::Version {
+                num,
+                encoding,
+                range,
+            } = payload
+            {
+                self.process_version(num, encoding, range)?;
+            }
+            Self::consume_buffer(8, buffer);
+        }
+
         loop {
             let (consumed, payload) = self.next_payload(buffer)?;
             match payload {

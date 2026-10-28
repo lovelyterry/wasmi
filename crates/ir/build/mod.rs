@@ -3,6 +3,7 @@ mod op;
 mod display;
 pub mod ident;
 mod isa;
+pub mod sbox;
 mod ty;
 
 use self::{

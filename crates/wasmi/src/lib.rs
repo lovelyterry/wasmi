@@ -214,6 +214,9 @@ pub use self::{
     linker::Linker,
     memory::{Memory, MemoryType, MemoryTypeBuilder},
     module::{
+        format_c_header,
+        precompile_wasm,
+        precompile_zasm,
         CustomSection,
         CustomSectionsIter,
         ExportType,

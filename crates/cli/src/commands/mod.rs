@@ -2,6 +2,9 @@
 mod run;
 #[cfg(feature = "wast")]
 mod wast;
+mod export_c;
+mod export_vasm;
+mod export_zasm;
 
 use anyhow::Error;
 use clap::Parser;
@@ -10,6 +13,9 @@ use clap::Parser;
 pub use self::run::RunCommand;
 #[cfg(feature = "wast")]
 pub use self::wast::WastCommand;
+pub use self::export_c::ExportCCommand;
+pub use self::export_vasm::ExportVasmCommand;
+pub use self::export_zasm::ExportZasmCommand;
 
 #[derive(Parser)]
 #[command(
@@ -43,6 +49,12 @@ pub enum SubCommand {
     Run(RunCommand),
     #[cfg(feature = "wast")]
     Wast(WastCommand),
+    /// Precompile a WebAssembly module and export as static C array header (.h) for MCU Flash.
+    ExportC(ExportCCommand),
+    /// Precompile a WebAssembly module and export as a pure binary (.vasm) file.
+    ExportVasm(ExportVasmCommand),
+    /// Precompile a WebAssembly module and export as a 4KB-chunked LZ4 compressed (.zasm) file.
+    ExportZasm(ExportZasmCommand),
 }
 
 /// Implemented by sub-commands in order to execute them.
@@ -64,6 +76,10 @@ impl Command for WasmiApp {
 
             #[cfg(feature = "wast")]
             SubCommand::Wast(c) => c.execute(),
+
+            SubCommand::ExportC(c) => c.execute(),
+            SubCommand::ExportVasm(c) => c.execute(),
+            SubCommand::ExportZasm(c) => c.execute(),
         }
     }
 }

@@ -8,7 +8,9 @@ mod import;
 pub(crate) mod init_expr;
 mod instantiate;
 mod parser;
+pub mod precompile;
 mod read;
+pub mod zasm;
 pub(crate) mod utils;
 
 use self::{
@@ -26,7 +28,9 @@ pub use self::{
     global::GlobalIdx,
     import::{FuncTypeIdx, ImportName},
     instantiate::InstantiationError,
+    precompile::{format_c_header, precompile_wasm},
     read::{Read, ReadError},
+    zasm::precompile_zasm,
 };
 pub(crate) use self::{
     data::{DataSegment, DataSegments, InitDataSegment, PassiveDataSegmentBytes},
@@ -234,8 +238,20 @@ impl Module {
     pub fn new(engine: &Engine, wasm: impl AsRef<[u8]>) -> Result<Self, Error> {
         let wasm = wasm.as_ref();
         #[cfg(feature = "wat")]
-        let wasm = &wat::parse_bytes(wasm)?[..];
+        let wasm = if wasm.starts_with(b"vasm") {
+            wasm
+        } else {
+            &wat::parse_bytes(wasm)?[..]
+        };
         ModuleParser::new(engine).parse_buffered(wasm)
+    }
+
+    /// Creates a new Wasm [`Module`] from a static byte buffer (e.g. stored in MCU Flash memory).
+    ///
+    /// If the byte buffer contains a precompiled `"wasmi_ir"` section, the compiled bytecode
+    /// is executed directly in-place from Flash memory without allocating heap memory for it.
+    pub fn new_static(engine: &Engine, wasm: &'static [u8]) -> Result<Self, Error> {
+        ModuleParser::new(engine).parse_buffered_static(wasm)
     }
 
     /// Creates a new Wasm [`Module`] from the given Wasm bytecode buffer.
